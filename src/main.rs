@@ -3,7 +3,7 @@ mod io;
 mod types;
 
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -147,15 +147,31 @@ fn process_sequences(
         File::open(seq_path).with_context(|| format!("无法打开序列文件: {}", seq_path))?;
     let reader = BufReader::new(file);
 
-    let mut global_result = ThreadResult::default();
-    let mut total = 0usize;
-
     let lines: Vec<String> = reader
         .lines()
         .filter_map(|l| l.ok())
         .map(|l| l.trim().to_owned())
         .filter(|l| !l.is_empty())
         .collect();
+
+    let total = lines.len();
+    if total == 0 {
+        eprintln!("    序列文件为空，跳过");
+        return Ok(ThreadResult::default());
+    }
+
+    eprintln!(
+        "    总条数: {total}  |  chunk: {chunk_size}  |  引物: {p_len}  |  变体: {v_len}",
+        total = total,
+        chunk_size = chunk_size,
+        p_len = primers.len(),
+        v_len = lib.variants.len(),
+    );
+
+    let mut global_result = ThreadResult::default();
+    let mut processed = 0usize;
+    let bar_width = 40usize;
+    let start = std::time::Instant::now();
 
     for chunk in lines.chunks(chunk_size) {
         let chunk: Vec<&str> = chunk.iter().map(|s| s.as_str()).collect();
@@ -189,9 +205,34 @@ fn process_sequences(
             });
 
         global_result.merge(&chunk_result);
-        total += chunk.len();
-        eprintln!("    processed {} sequences", total);
+        processed += chunk.len();
+
+        // progress bar
+        let pct = processed as f64 / total as f64;
+        let filled = (bar_width as f64 * pct) as usize;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+        let elapsed = start.elapsed().as_secs_f64();
+        let rate = if elapsed > 0.0 { processed as f64 / elapsed } else { 0.0 };
+        let eta = if rate > 0.0 { (total - processed) as f64 / rate } else { 0.0 };
+
+        eprint!(
+            "\r    [{bar}] {pct:5.1}%  {processed}/{total}  {rate:.0} seq/s  ETA: {eta:.0}s",
+            pct = pct * 100.0,
+            processed = processed,
+            total = total,
+            rate = rate,
+            eta = eta,
+        );
+        std::io::stderr().flush().ok();
     }
+
+    let elapsed = start.elapsed().as_secs_f64();
+    eprintln!(
+        "\n    完成: {total} 条序列, 耗时 {elapsed:.1}s, 速度 {rate:.0} seq/s",
+        total = total,
+        elapsed = elapsed,
+        rate = total as f64 / elapsed.max(0.001),
+    );
 
     Ok(global_result)
 }
