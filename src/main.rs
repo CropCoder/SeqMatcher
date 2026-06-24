@@ -86,8 +86,8 @@ fn main() -> Result<()> {
         .with_context(|| format!("无法创建输出目录: {}", args.output_dir))?;
 
     eprintln!("  Loading primers from: {}", args.primer_csv);
-    let primers = Arc::new(io::load_primers(&args.primer_csv)?);
-    eprintln!("  Loaded {} primers", primers.len());
+    let primer_data = Arc::new(io::load_primers(&args.primer_csv)?);
+    eprintln!("  Loaded {} primers", primer_data.primers.len());
 
     eprintln!("  Loading library from: {}", args.library_csv);
     let lib = Arc::new(io::load_library(
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
             seq_input.path, seq_input.label
         );
         let result = process_sequences(
-            &primers,
+            &primer_data.primers,
             &lib,
             &seq_input.path,
             args.chunk_size,
@@ -117,11 +117,11 @@ fn main() -> Result<()> {
             seq_input.label
         ));
 
-        io::write_primer_counts(&primer_output, &primers, &result, &seq_input.label)?;
+        io::write_primer_counts(&primer_output, &primer_data, &result, &seq_input.label)?;
         io::write_variant_counts(
             &variant_output,
             &lib,
-            &primers,
+            &primer_data.primers,
             &result,
             &seq_input.label,
         )?;
@@ -176,9 +176,6 @@ fn process_sequences(
                     *local.primer_counts.entry(p_id.clone()).or_default() += 1;
                     let var_map = local.variant_counts.entry(p_id).or_default();
                     for (idx, var) in lib.variants.iter().enumerate() {
-                        if var.raw.is_empty() {
-                            continue;
-                        }
                         if seq_upper.contains(&var.raw) || seq_upper.contains(&var.rc) {
                             *var_map.entry(idx).or_default() += 1;
                         }

@@ -7,11 +7,30 @@ use csv::{Reader, StringRecord};
 
 use crate::types::{Primer, Variant, ThreadResult};
 
-pub fn load_primers(path: &str) -> Result<Vec<Primer>> {
+pub struct PrimerData {
+    pub primers: Vec<Primer>,
+    pub headers: Vec<String>,
+    pub records: Vec<StringRecord>,
+}
+
+pub struct LibraryData {
+    pub variants: Vec<Variant>,
+    pub headers: Vec<String>,
+    pub records: Vec<StringRecord>,
+}
+
+pub fn load_primers(path: &str) -> Result<PrimerData> {
     let mut reader = Reader::from_path(path)
         .with_context(|| format!("无法读取引物 CSV: {}", path))?;
 
+    let headers: Vec<String> = reader
+        .headers()?
+        .iter()
+        .map(|h| h.to_string())
+        .collect();
+
     let mut primers = Vec::new();
+    let mut records = Vec::new();
     for (i, record) in reader.records().enumerate() {
         let record = record?;
         if record.len() < 3 {
@@ -24,14 +43,13 @@ pub fn load_primers(path: &str) -> Result<Vec<Primer>> {
         let f = record[1].trim().to_string();
         let r = record[2].trim().to_string();
         primers.push(Primer::new(id, f, r));
+        records.push(record);
     }
-    Ok(primers)
-}
-
-pub struct LibraryData {
-    pub variants: Vec<Variant>,
-    pub headers: Vec<String>,
-    pub records: Vec<StringRecord>,
+    Ok(PrimerData {
+        primers,
+        headers,
+        records,
+    })
 }
 
 pub fn load_library(path: &str, seq_col_name: &str) -> Result<LibraryData> {
@@ -83,21 +101,22 @@ pub fn load_library(path: &str, seq_col_name: &str) -> Result<LibraryData> {
 
 pub fn write_primer_counts(
     path: &Path,
-    primers: &[Primer],
+    primer_data: &PrimerData,
     result: &ThreadResult,
     suffix: &str,
 ) -> Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
-    writeln!(writer, "primer_id,forward,reverse,count_{}", suffix)?;
-    for primer in primers {
+    // header: all original columns + count_{suffix}
+    let header_line = primer_data.headers.join(",");
+    writeln!(writer, "{},count_{}", header_line, suffix)?;
+
+    // data: original row + count
+    for (i, record) in primer_data.records.iter().enumerate() {
+        let primer = &primer_data.primers[i];
         let count = result.primer_counts.get(&primer.id).copied().unwrap_or(0);
-        writeln!(
-            writer,
-            "{},{},{},{}",
-            primer.id, primer.f, primer.r, count
-        )?;
+        writeln!(writer, "{},{}", csv_to_line(record), count)?;
     }
     writer.flush()?;
     Ok(())
@@ -129,19 +148,6 @@ pub fn write_variant_counts(
 
     // Write data rows
     for (idx, record) in lib.records.iter().enumerate() {
-        let mut row = csv_to_line(record);
-        for primer in primers {
-            let count = result
-                .variant_counts
-                .get(&primer.id)
-                .and_then(|m| m.get(&idx))
-                .copied()
-                .unwrap_or(0);
-            row.push(',');
-            write!(writer, "{},{}", row, count)?;
-            // Reset row for next primer - actually let me rethink this
-        }
-        // Re-implement more carefully
         write!(writer, "{}", csv_to_line(record))?;
         for primer in primers {
             let count = result
