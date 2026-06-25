@@ -39,13 +39,34 @@ impl Variant {
     }
 }
 
-#[derive(Default, Clone)]
+/// Per-thread accumulator. `hit_buf` is a reusable scratch buffer for
+/// AC match dedup — never merged, only used transiently during fold.
+#[derive(Clone)]
 pub struct ThreadResult {
     pub primer_counts: HashMap<String, usize>,
     pub variant_counts: HashMap<String, HashMap<usize, usize>>,
+    pub hit_buf: Vec<usize>,
+}
+
+impl Default for ThreadResult {
+    fn default() -> Self {
+        Self {
+            primer_counts: HashMap::new(),
+            variant_counts: HashMap::new(),
+            hit_buf: Vec::new(),
+        }
+    }
 }
 
 impl ThreadResult {
+    pub fn with_capacity(num_primers: usize) -> Self {
+        Self {
+            primer_counts: HashMap::with_capacity(num_primers),
+            variant_counts: HashMap::with_capacity(num_primers),
+            hit_buf: Vec::new(),
+        }
+    }
+
     pub fn merge(&mut self, other: &ThreadResult) {
         for (k, v) in &other.primer_counts {
             *self.primer_counts.entry(k.clone()).or_default() += v;
