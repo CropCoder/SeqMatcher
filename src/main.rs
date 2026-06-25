@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aho_corasick::AhoCorasick;
 use anyhow::{Context, Result};
 use clap::Parser;
 use rayon::prelude::*;
@@ -96,6 +97,17 @@ fn main() -> Result<()> {
     )?);
     eprintln!("  Loaded {} library variants", lib.variants.len());
 
+    // Build Aho-Corasick automaton for multi-pattern variant matching.
+    // Each variant contributes two patterns (raw + rc), mapping back via pattern_to_variant.
+    let (ac, pattern_to_variant, empty_variants) = build_variant_ac(&lib.variants);
+    let ac = Arc::new(ac);
+    if !empty_variants.is_empty() {
+        eprintln!(
+            "  Note: {} empty variant(s) — always counted per match (Python compat)",
+            empty_variants.len()
+        );
+    }
+
     for seq_input in &args.seq_files {
         eprintln!(
             "  Processing: {} -> {}",
@@ -104,6 +116,9 @@ fn main() -> Result<()> {
         let result = process_sequences(
             &primer_data.primers,
             &lib,
+            &ac,
+            &pattern_to_variant,
+            &empty_variants,
             &seq_input.path,
             args.chunk_size,
         )?;
@@ -137,9 +152,42 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Build Aho-Corasick from variants, returning (ac, pattern_to_variant, empty_variant_indices).
+/// pattern_to_variant[i] = variant index for pattern i.
+fn build_variant_ac(variants: &[types::Variant]) -> (AhoCorasick, Vec<usize>, Vec<usize>) {
+    let mut patterns = Vec::new();
+    let mut pattern_to_variant = Vec::new();
+    let mut empty_variants = Vec::new();
+
+    for (i, var) in variants.iter().enumerate() {
+        if var.raw.is_empty() {
+            empty_variants.push(i);
+            continue;
+        }
+        patterns.push(var.raw.clone());
+        pattern_to_variant.push(i);
+        if !var.rc.is_empty() && var.rc != var.raw {
+            patterns.push(var.rc.clone());
+            pattern_to_variant.push(i);
+        }
+    }
+
+    let ac = if patterns.is_empty() {
+        // All variants empty; create a dummy automaton that never matches.
+        AhoCorasick::new(["__SEQMATCHER_NOOP__"]).unwrap()
+    } else {
+        AhoCorasick::new(&patterns).expect("failed to build Aho-Corasick automaton")
+    };
+
+    (ac, pattern_to_variant, empty_variants)
+}
+
 fn process_sequences(
     primers: &[Primer],
     lib: &LibraryData,
+    ac: &AhoCorasick,
+    pattern_to_variant: &[usize],
+    empty_variants: &[usize],
     seq_path: &str,
     chunk_size: usize,
 ) -> Result<ThreadResult> {
@@ -161,11 +209,12 @@ fn process_sequences(
     }
 
     eprintln!(
-        "    总条数: {total}  |  chunk: {chunk_size}  |  引物: {p_len}  |  变体: {v_len}",
+        "    总条数: {total}  |  chunk: {chunk_size}  |  引物: {p_len}  |  变体: {v_len}  |  AC patterns: {pat}",
         total = total,
         chunk_size = chunk_size,
         p_len = primers.len(),
         v_len = lib.variants.len(),
+        pat = pattern_to_variant.len(),
     );
 
     let mut global_result = ThreadResult::default();
@@ -191,10 +240,21 @@ fn process_sequences(
                 if let Some(p_id) = matched {
                     *local.primer_counts.entry(p_id.clone()).or_default() += 1;
                     let var_map = local.variant_counts.entry(p_id).or_default();
-                    for (idx, var) in lib.variants.iter().enumerate() {
-                        if seq_upper.contains(&var.raw) || seq_upper.contains(&var.rc) {
-                            *var_map.entry(idx).or_default() += 1;
-                        }
+
+                    // Aho-Corasick single-pass multi-pattern search
+                    let mut hits: Vec<usize> = ac
+                        .find_iter(&seq_upper)
+                        .map(|m| pattern_to_variant[m.pattern().as_usize()])
+                        .collect();
+                    hits.sort_unstable();
+                    hits.dedup();
+                    for vi in hits {
+                        *var_map.entry(vi).or_default() += 1;
+                    }
+
+                    // Empty variants always match (Python compat)
+                    for &vi in empty_variants {
+                        *var_map.entry(vi).or_default() += 1;
                     }
                 }
                 local
@@ -235,4 +295,69 @@ fn process_sequences(
     );
 
     Ok(global_result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn naive_variant_search(seq: &str, variants: &[types::Variant]) -> Vec<usize> {
+        variants
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| {
+                if v.raw.is_empty() {
+                    return true; // Python compat: "" in seq is always True
+                }
+                seq.contains(&v.raw) || (!v.rc.is_empty() && seq.contains(&v.rc))
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    #[test]
+    fn test_ac_matches_naive() {
+        let variants: Vec<types::Variant> = vec![
+            types::Variant::new("ATCGAAAA"),
+            types::Variant::new("GGGCCCCC"),
+            types::Variant::new("TTTTAAAA"),
+            types::Variant::new(""), // empty — Python compat
+        ];
+
+        let (ac, p2v, empty) = build_variant_ac(&variants);
+        assert_eq!(empty, vec![3]);
+
+        let seq = "NNNATCGAAAANNNGGGCCCCCNNN";
+
+        // Aho-Corasick result
+        let mut ac_hits: Vec<usize> = ac
+            .find_iter(seq)
+            .map(|m| p2v[m.pattern().as_usize()])
+            .collect();
+        ac_hits.sort_unstable();
+        ac_hits.dedup();
+        for &vi in &empty {
+            ac_hits.push(vi);
+        }
+        ac_hits.sort_unstable();
+        ac_hits.dedup();
+
+        // Naive result
+        let mut naive = naive_variant_search(seq, &variants);
+        naive.sort_unstable();
+
+        assert_eq!(ac_hits, naive, "Aho-Corasick must match naive contains()");
+    }
+
+    #[test]
+    fn test_ac_reverse_complement_match() {
+        // Variant "ATCG" has rc "CGAT"
+        let variants = vec![types::Variant::new("ATCG")];
+        let (ac, p2v, empty) = build_variant_ac(&variants);
+        assert!(empty.is_empty());
+
+        // seq contains rc "CGAT" but not raw "ATCG"
+        let seq = "NNNNCGATNNNN";
+        let hits: Vec<_> = ac.find_iter(seq).map(|m| p2v[m.pattern().as_usize()]).collect();
+        assert!(!hits.is_empty(), "AC should find RC match");
+    }
 }
