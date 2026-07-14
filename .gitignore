@@ -1,3 +1,26 @@
 /target
 .DS_Store
 *.csv
+/output
+seq_tmp.txt
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Build artifacts
+*.profraw
+*.profdata
+
+# Compiled binary in project root
+/seq_matcher
+
+# Release binaries (distributed via GitHub Releases, not committed)
+/releases/

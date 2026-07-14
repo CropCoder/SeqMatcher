@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: SeqMatcher
+message: "If you use this software in your research, please cite it as below."
+type: software
+authors:
+  - family-names: Zhao
+    given-names: Jiwen
+    orcid: "https://orcid.org/0000-0000-0000-0000"
+    url: "https://github.com/CropCoder"
+version: 2.0.0
+date-released: 2026-07-13
+repository-code: "https://github.com/CropCoder/SeqMatcher"
+url: "https://github.com/CropCoder/SeqMatcher"
+abstract: >
+  High-performance DNA sequence primer matching and library variant counting
+  tool. Uses Aho-Corasick multi-pattern matching with Rayon data parallelism
+  for scalable processing of large sequencing datasets.
+keywords:
+  - bioinformatics
+  - DNA sequencing
+  - primer matching
+  - variant counting
+  - Aho-Corasick
+  - Rust
+license: MIT

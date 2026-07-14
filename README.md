@@ -1,10 +1,10 @@
 # SeqMatcher
 
-高性能多线程 DNA 序列引物匹配与文库变体计数工具。
+High-performance multi-threaded DNA sequence primer matching and library variant counting tool.
 
-将海量测序序列与已知引物库进行匹配，统计各引物的序列覆盖度，并量化文库变体在匹配序列中的出现频次。Rust 全链路实现，Rayon 多线程并行 + Aho-Corasick 多模式匹配，核心热路径用编译期查找表优化。
+Matches massive sequencing reads against known primer pairs, quantifies per-primer sequence coverage, and counts library variant occurrences within matched sequences. Full Rust implementation with Rayon parallel processing and Aho-Corasick multi-pattern matching.
 
-## 安装
+## Installation
 
 ```bash
 git clone https://github.com/CropCoder/SeqMatcher.git
@@ -12,18 +12,18 @@ cd SeqMatcher
 cargo build --release
 ```
 
-二进制文件位于 `target/release/seq_matcher`。
+The binary will be at `target/release/seq_matcher`.
 
-### macOS → Linux 交叉编译
+### Cross-compile from macOS to Linux
 
 ```bash
-# 前提: brew install musl-cross && rustup target add x86_64-unknown-linux-musl
+# Prerequisites: brew install musl-cross && rustup target add x86_64-unknown-linux-musl
 ./build-linux.sh
 ```
 
-生成 `target/x86_64-unknown-linux-musl/release/seq_matcher`，ELF 64-bit 静态链接，可直接拷贝到 Linux 运行。
+Produces `target/x86_64-unknown-linux-musl/release/seq_matcher` — a statically-linked ELF 64-bit binary.
 
-## 快速开始
+## Quick Start
 
 ```bash
 ./target/release/seq_matcher \
@@ -33,96 +33,156 @@ cargo build --release
   --output-dir output
 ```
 
-### 运行示例
+### Example Run
 
 ```
   Loading primers from: primers_list_all.csv
   Loaded 32 primers
   Loading library from: 80_full_library_2_12.csv
   Loaded 8192 library variants
-  Processing: data/11_seq.txt -> a_11
-    总条数: 1500000  |  chunk: 10000  |  引物: 32  |  变体: 8192  |  AC patterns: 16384
-    [████████████████████░░░░░░░░░░░░░░░░]  55.0%  825000/1500000  45230 seq/s  ETA: 15s
-    完成: 1500000 条序列, 耗时 33.2s, 速度 45181 seq/s
+  Total: ~1500000 (est.) | 2.7 MB | chunk: 100000 | primers: 32 | variants: 8192 | AC patterns: 16384
+  [████████████████████░░░░░░░░░░░░░░░░]  55.0%  825000/1500000  45230 seq/s  ETA: 15s
+  Complete: 1500000 sequences in 33.2s, 45181 seq/s
+  Written: output/a_11_seq_matched_primers_count.csv, output/a_11_seq_matched_library_variant_count.csv
   All done.
 ```
 
-### 输入文件格式
+## Input File Formats
 
-**引物 CSV**（`--primer-csv`）— 任意列数，工具保留所有原始列。默认取前三列为引物 ID、正向序列、反向序列。
+**Primer CSV** (`--primer-csv`) — any number of columns; all original columns are preserved in output. The first three columns are treated as primer ID, forward sequence, and reverse sequence.
 
-| primer_id | forward_seq | reverse_seq | 其他列...          |
+| primer_id | forward_seq | reverse_seq | extra_columns... |
 |-----------|-------------|-------------|-------------------|
-| P001      | ATCGGTACC   | GCTATAGCA   | （保留，原样输出）    |
-| P002      | TGCACTGAC   | CGTACGATG   | （保留，原样输出）    |
+| P001      | ATCGGTACC   | GCTATAGCA   | (preserved)        |
+| P002      | TGCACTGAC   | CGTACGATG   | (preserved)        |
 
-**文库 CSV**（`--library-csv`）— 含一列变体序列，列名通过 `--library-seq-col` 配置。
+**Library CSV** (`--library-csv`) — contains a variant sequence column whose name is configured via `--library-seq-col`.
 
-| variant_id | single_degenerate_library_expanded_reference | 其他列...       |
-|------------|---------------------------------------------|-----------------|
-| V001       | ATCGNNNTCGA                                 | （保留，原样输出） |
+| variant_id | single_degenerate_library_expanded_reference | extra_columns... |
+|------------|---------------------------------------------|-------------------|
+| V001       | ATCGNNNTCGA                                 | (preserved)        |
 
-**序列文件**（`--seq`）— 每行一条 DNA 序列的纯文本文件。
+**Sequence files** (`--seq`) — plain text, one DNA sequence per line.
 
-### 输出文件
+## Output Files
 
-每次运行对每个 `--seq` 输入生成两个 CSV：
+Two CSV files are generated per `--seq` input:
 
-- `{LABEL}_seq_matched_primers_count.csv` — 原始引物表所有列 + 一列 `count_{LABEL}`（每条引物匹配到的序列总数）
-- `{LABEL}_seq_matched_library_variant_count.csv` — 原始文库表所有列 + 每个引物的变体命中计数列（列名 `{primer_id}_{LABEL}`）
+- `{LABEL}_seq_matched_primers_count.csv` — original primer table with an added `count_{LABEL}` column (number of sequences matched to each primer)
+- `{LABEL}_seq_matched_library_variant_count.csv` — original library table with per-primer variant count columns (`{primer_id}_{LABEL}`)
 
-## CLI 参考
+Additionally, each run produces:
+
+- `run_summary.json` — machine-readable run report (inputs, parameters, system info)
+- `run_summary.txt` — human-readable run report with reproducibility command
+
+## CLI Reference
 
 ```
 Usage: seq_matcher [OPTIONS] --primer-csv <PRIMER_CSV> --library-csv <LIBRARY_CSV>
 
 Options:
-  -p, --primer-csv <PRIMER_CSV>              引物 CSV 文件路径
-  -l, --library-csv <LIBRARY_CSV>            文库 CSV 文件路径
-      --library-seq-col <LIBRARY_SEQ_COL>    文库 CSV 中序列所在列名
-                                              [default: single_degenerate_library_expanded_reference]
-  -s, --seq <SEQ_FILES>                      序列文件: 格式为 LABEL:PATH (如 a_11:data/11_seq.txt)
-                                              可多次指定以批量处理
-  -o, --output-dir <OUTPUT_DIR>              输出目录 [default: output]
-  -c, --chunk-size <CHUNK_SIZE>              并行处理块大小 (条/批) [default: 10000]
-  -t, --threads <THREADS>                    线程数 (默认使用全部 CPU 核心)
-  -h, --help                                 打印帮助信息
-  -V, --version                              打印版本号
+  -p, --primer-csv <PRIMER_CSV>
+          Primer CSV file path (columns: id, forward_seq, reverse_seq)
+  -l, --library-csv <LIBRARY_CSV>
+          Library variant CSV file path
+      --library-seq-col <LIBRARY_SEQ_COL>
+          Column name in library CSV containing variant sequence
+          [default: single_degenerate_library_expanded_reference]
+  -s, --seq <SEQ_FILES>
+          Sequence files in LABEL:PATH format (e.g. a_11:data/11_seq.txt).
+          Repeatable for batch processing.
+  -o, --output-dir <OUTPUT_DIR>
+          Output directory for result CSV files [default: output]
+  -c, --chunk-size <CHUNK_SIZE>
+          Sequences per parallel processing chunk [default: 100000]
+  -t, --threads <THREADS>
+          Number of worker threads (default: all CPU cores)
+      --dry-run
+          Validate inputs and exit without processing
+  -q, --quiet
+          Suppress non-error output
+  -v, --verbose
+          Enable verbose debug output
+      --timestamp-output
+          Append timestamp to output filenames for reproducibility
+  -h, --help
+          Print help information
+  -V, --version
+          Print version information
 ```
 
-## 算法
+## Algorithm
 
-1. 加载引物表与文库表，预计算所有序列的反向互补。
-2. 构建 **Aho-Corasick 自动机**，将全部文库变体（原始 + 反向互补）编码为多模式匹配机，启动时构建一次，`Arc` 跨线程复用。
-3. 目标序列按可配块大小分片，Rayon 多线程并行处理。
-4. 每条序列**首次命中**引物即停止检索（first-match-wins）。
-5. 匹配到引物后，对序列执行**单次 Aho-Corasick 扫描**即可检出所有命中变体（去重），替代逐变体 O(V) 次 `contains()` 调用。
-6. 各线程内部无锁统计，块处理后合并至全局结果。
-7. 实时进度条显示百分比、吞吐量、预计剩余时间。
-8. 批量输出两个 CSV 文件。
+1. Load primer and library tables; pre-compute reverse complements for all sequences.
+2. Build an **Aho-Corasick automaton** encoding all library variants (original + reverse complement) as multi-pattern matching states. Built once at startup and shared via `Arc` across threads.
+3. Estimate total lines from file size (no pre-scan), then stream sequences in configurable chunk sizes for Rayon parallel processing.
+4. Each sequence is tested against primers with **first-match-wins** semantics.
+5. Matched sequences undergo a **single Aho-Corasick scan** to detect all variant hits (deduplicated), replacing per-variant O(V) `contains()` calls.
+6. Each thread accumulates counts lock-free; results are merged at chunk boundaries.
+7. Real-time progress bar shows completion percentage, throughput, and ETA.
+8. Batch output to CSV files with run summary reports.
 
-### 性能
+### Performance
 
-| 优化项 | 实现 |
-|--------|------|
-| 反向互补 | 编译期 `const` 128 字节 LUT，单周期映射 |
-| 变体匹配 | Aho-Corasick 多模式搜索，O(L+M) 替代 O(V×L) |
-| 并行处理 | Rayon work-stealing，chunk 级并行 |
-| 线程间共享 | `Arc` 零拷贝传递引物、文库、自动机 |
-| 输出 I/O | `BufWriter` 批量写入 |
-| 进度反馈 | `\r` 原地刷新进度条，无额外 I/O 开销 |
+| Optimization | Implementation |
+|-------------|----------------|
+| Reverse complement | Compile-time `const` 128-byte LUT, single-cycle indexed mapping |
+| Variant matching | Aho-Corasick multi-pattern search, O(L+M) instead of O(V*L) |
+| Parallel processing | Rayon work-stealing, chunk-level parallelism |
+| Cross-thread sharing | `Arc` zero-copy sharing of primers, library, automaton |
+| Output I/O | `BufWriter` buffered writes |
+| Line counting | File-size-based estimation avoids full pre-scan I/O |
+| Variant count output | Pre-built column vectors for O(1) array lookups over O(P*V) HashMap access |
+| Progress feedback | `\r` in-place progress bar, no extra I/O overhead |
 
-## 依赖
+## Library Usage
 
-| crate         | 用途                  |
-|---------------|----------------------|
-| clap          | CLI 参数解析           |
-| csv           | CSV 读写              |
-| rayon         | 数据并行               |
-| serde         | 序列化 (derive)       |
-| anyhow        | 错误处理               |
-| aho-corasick  | 多模式子串匹配 (变体搜索) |
+SeqMatcher can be used as a Rust library:
+
+```rust
+use seq_matcher::{io, matcher};
+
+let primer_data = io::load_primers("primers.csv")?;
+let lib = io::load_library("library.csv", "sequence_col")?;
+let ac_data = matcher::build_variant_ac(&lib.variants);
+```
+
+## Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| clap | CLI argument parsing |
+| csv | CSV reading and writing |
+| rayon | Data parallelism |
+| anyhow | Error handling with context |
+| aho-corasick | Multi-pattern substring matching (variant search) |
+| tracing | Structured logging |
+| tracing-subscriber | Log formatting and env-filter support |
+
+### Dev Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| criterion | Statistical benchmarking |
+| tempfile | Temporary files for integration tests |
+
+## Citation
+
+If you use SeqMatcher in your research, please cite:
+
+```bibtex
+@software{seq_matcher,
+  author = {Zhao, Jiwen},
+  title = {SeqMatcher: High-performance DNA sequence primer matching and variant counting},
+  year = {2026},
+  version = {2.0.0},
+  url = {https://github.com/CropCoder/SeqMatcher}
+}
+```
+
+A `CITATION.cff` file is included in the repository for GitHub/Zenodo integration.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
