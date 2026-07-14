@@ -1,7 +1,7 @@
 //! Progress bar and line counting utilities.
 //!
 //! Provides real-time progress display with throughput and ETA estimation,
-//! plus efficient file line counting for progress tracking.
+//! plus efficient file line estimation for progress tracking.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -51,31 +51,17 @@ pub fn estimate_total_lines(path: &str, sample_lines: usize) -> Result<(u64, u64
         Ok((estimated.max(1), file_size))
     } else {
         // File is too short to sample — count exactly
-        file.seek(SeekFrom::Start(0))?;
-        let exact = count_lines_in_buf(&mut file)?;
+        let exact = count_lines_exact(&mut file)?;
         file.seek(SeekFrom::Start(0))?;
         Ok((exact, file_size))
     }
 }
 
-/// Count newlines in a file by scanning raw bytes (256KB buffer).
-///
-/// Fast line counting that avoids UTF-8 validation overhead of
-/// line-by-line reading. Handles files with or without trailing newline.
-/// Seeks back to the beginning of the file after counting.
-///
-/// Note: for pipeline progress estimation, [`estimate_total_lines`] is
-/// preferred as it avoids a full file scan.
-#[allow(dead_code)]
-pub fn count_lines(path: &str) -> Result<u64> {
-    let mut file = File::open(path)?;
-    let count = count_lines_in_buf(&mut file)?;
-    file.seek(SeekFrom::Start(0))?;
-    Ok(count)
-}
-
 /// Count newlines in an already-open file using a 256KB read buffer.
-fn count_lines_in_buf(file: &mut File) -> Result<u64> {
+///
+/// Accurate but requires a full scan. Prefer [`estimate_total_lines`] for
+/// progress-bar use; use this only when an exact count is required.
+fn count_lines_exact(file: &mut File) -> Result<u64> {
     let mut buf = [0u8; 256 * 1024];
     let mut count = 0u64;
     let mut non_empty = false;
@@ -104,12 +90,24 @@ fn count_lines_in_buf(file: &mut File) -> Result<u64> {
 /// Uses `\r` to overwrite the same line. The bar width is configurable.
 /// Callers should flush stderr after this to ensure immediate display.
 pub fn print_progress(processed: u64, total: u64, start: &std::time::Instant, bar_width: usize) {
-    let pct = if total > 0 { processed as f64 / total as f64 } else { 0.0 };
+    let pct = if total > 0 {
+        processed as f64 / total as f64
+    } else {
+        0.0
+    };
     let filled = (bar_width as f64 * pct) as usize;
     let bar = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(bar_width.saturating_sub(filled));
     let elapsed = start.elapsed().as_secs_f64();
-    let rate = if elapsed > 0.0 { processed as f64 / elapsed } else { 0.0 };
-    let eta = if rate > 0.0 { (total.saturating_sub(processed)) as f64 / rate } else { 0.0 };
+    let rate = if elapsed > 0.0 {
+        processed as f64 / elapsed
+    } else {
+        0.0
+    };
+    let eta = if rate > 0.0 {
+        (total.saturating_sub(processed)) as f64 / rate
+    } else {
+        0.0
+    };
 
     eprint!(
         "\r    [{bar}] {pct:5.1}%  {processed}/{total}  {rate:.0} seq/s  ETA: {eta:.0}s",
