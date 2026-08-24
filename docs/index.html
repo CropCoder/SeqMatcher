@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+  SeqMatcher — Official Website (English, single-file, no external dependencies)
+  ----------------------------------------------------------------------------
+  功能简介：
+    高性能多线程 DNA 序列引物匹配与文库变体计数工具的官方网站首页。
+    单文件实现，内嵌 CSS 与少量原生 JS，无需任何外部资源即可离线打开，
+    可直接部署到 GitHub Pages（docs/ 目录）。
+
+  作者：Jiwen Zhao (https://github.com/CropCoder)
+
+  页面结构（自上而下）：
+    1. 顶部导航栏（固定、滚动高亮、移动端折叠）
+    2. Hero 区（工具定位、核心指标、终端演示）
+    3. Overview 基本信息
+    4. Features 特性网格
+    5. Installation 安装
+    6. Quick Start 快速开始 + 示例运行
+    7. CLI Reference 命令行参数
+    8. Input Formats 输入格式
+    9. Output Files 输出文件
+    10. Algorithm 匹配原理 + 性能优化
+    11. Best Practices 使用建议
+    12. Citation 引用 + License
+    13. Footer 页脚
+============================================================================ -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SeqMatcher — High-Performance DNA Primer Matching &amp; Variant Counting</title>
+  <meta name="description" content="SeqMatcher is a high-performance, multi-threaded DNA sequence primer matching and library variant counting tool written in Rust, powered by Rayon parallelism and Aho-Corasick multi-pattern matching." />
+  <meta name="author" content="Jiwen Zhao" />
+  <meta name="keywords" content="DNA, primer matching, variant counting, Rust, Aho-Corasick, Rayon, bioinformatics, sequence analysis" />
+
+  <!-- 内嵌 favicon（DNA 双螺旋 SVG，避免额外请求） -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a192f'/%3E%3Cpath d='M6 8c3 3 3 13 0 16M26 8c-3 3-3 13 0 16M16 6v20' stroke='%2322d3ee' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+
+  <style>
+    /* ======================================================================
+       CSS 变量与全局主题（浅色学术 + 深色科技 Hero 的现代混搭风格）
+       ====================================================================== */
+    :root {
+      --bg: #f6f9fc;            /* 页面底色 */
+      --surface: #ffffff;       /* 卡片底色 */
+      --ink: #0f172a;           /* 主文字 */
+      --muted: #526279;         /* 次要文字 */
+      --border: #e3e9f1;        /* 分隔线 */
+      --primary: #0e7490;       /* 主色（深青） */
+      --primary-strong: #155e75;
+      --accent: #06b6d4;        /* 强调色（亮青） */
+      --accent-soft: #e0f7fd;   /* 强调色浅底 */
+      --dark: #0a192f;          /* 深色区块背景 */
+      --dark-2: #11233c;        /* 深色渐变第二色 */
+      --code-bg: #0d1b2e;       /* 代码块背景 */
+      --code-ink: #dbe7f3;      /* 代码块文字 */
+      --code-dim: #7f96ad;      /* 代码块次要文字 */
+      --code-accent: #34d399;   /* 代码块强调（命令提示符） */
+      --radius: 14px;
+      --radius-lg: 20px;
+      --shadow-sm: 0 1px 3px rgba(15, 42, 66, 0.08);
+      --shadow-md: 0 8px 30px rgba(15, 42, 66, 0.10);
+      --shadow-lg: 0 20px 50px rgba(10, 25, 47, 0.25);
+      --font-sans: "Arial", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, "Menlo", monospace;
+      --nav-h: 64px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-h) + 12px); }
+
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    h1, h2, h3, h4 { line-height: 1.2; color: var(--ink); font-weight: 700; }
+
+    /* 通用内容容器：限制最大宽度、水平居中 */
+    .container {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    section { padding: 80px 0; }
+
+    /* Section 标题样式：小标签 + 大标题 + 副标题 */
+    .section-head { max-width: 760px; margin-bottom: 48px; }
+    .section-head .kicker {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--primary);
+      background: var(--accent-soft);
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    .section-head h2 { font-size: clamp(28px, 4vw, 38px); margin: 0 0 14px; }
+    .section-head p { color: var(--muted); font-size: 17px; margin: 0; }
+
+    /* ======================================================================
+       顶部导航栏
+       ====================================================================== */
+    .nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: saturate(180%) blur(14px);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+      transition: box-shadow 0.2s ease;
+    }
+    .nav.scrolled { box-shadow: 0 6px 24px rgba(10, 25, 47, 0.08); }
+    .nav-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; color: var(--ink); }
+    .brand:hover { text-decoration: none; }
+    .brand .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--dark), #164e63);
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #22d3ee; font-size: 15px; font-weight: 800;
+      flex-shrink: 0;
+    }
+    .brand .ver {
+      font-size: 11px; font-weight: 700; color: var(--primary);
+      background: var(--accent-soft); padding: 2px 7px; border-radius: 6px;
+      margin-left: 2px;
+    }
+    .nav-links { display: flex; align-items: center; gap: 4px; list-style: none; margin: 0; padding: 0; }
+    .nav-links a {
+      display: block;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      border-radius: 8px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-links a:hover { color: var(--ink); background: #eef4f9; text-decoration: none; }
+    .nav-links a.active { color: var(--primary); background: var(--accent-soft); }
+    .nav-cta {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 14px; font-weight: 700; color: #fff;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      padding: 9px 18px; border-radius: 9px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.15s, box-shadow 0.15s;
+      white-space: nowrap;
+    }
+    .nav-cta:hover { text-decoration: none; transform: translateY(-1px); box-shadow: var(--shadow-md); color: #fff; }
+
+    /* 移动端菜单按钮 */
+    .nav-toggle {
+      display: none;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 8px;
+      width: 40px; height: 40px;
+      cursor: pointer;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+    .nav-toggle span { display: block; width: 18px; height: 2px; background: var(--ink); border-radius: 2px; }
+
+    /* ======================================================================
+       Hero 区
+       ====================================================================== */
+    .hero {
+      position: relative;
+      padding: calc(var(--nav-h) + 72px) 0 88px;
+      background:
+        radial-gradient(1200px 500px at 80% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 10% 110%, rgba(45, 212, 191, 0.12), transparent 55%),
+        linear-gradient(135deg, var(--dark) 0%, var(--dark-2) 58%, #0b2540 100%);
+      color: #dbe7f3;
+      overflow: hidden;
+    }
+    /* 背景网格纹理（DNA 双螺旋线稿装饰） */
+    .hero::before {
+      content: "";
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(148, 184, 216, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 184, 216, 0.06) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at center, black 40%, transparent 85%);
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 56px; align-items: center; }
+    .hero h1 {
+      color: #fff;
+      font-size: clamp(38px, 6vw, 58px);
+      margin: 0 0 18px;
+      letter-spacing: -0.02em;
+    }
+    .hero h1 .grad {
+      background: linear-gradient(90deg, #22d3ee, #2dd4bf);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero .tagline { font-size: 19px; color: #aebfd4; max-width: 560px; margin: 0 0 28px; }
+    .hero .badges { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 34px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 600; color: #cfe0f0;
+      background: rgba(148, 184, 216, 0.10);
+      border: 1px solid rgba(148, 184, 216, 0.22);
+      padding: 7px 13px; border-radius: 999px;
+    }
+    .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 15px; font-weight: 700;
+      padding: 13px 24px; border-radius: 10px;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-2px); }
+    .btn-primary { color: #04242b; background: linear-gradient(135deg, #22d3ee, #2dd4bf); box-shadow: 0 10px 26px rgba(34, 211, 238, 0.28); }
+    .btn-primary:hover { box-shadow: 0 14px 34px rgba(34, 211, 238, 0.4); color: #04242b; }
+    .btn-ghost { color: #dbe7f3; background: rgba(148, 184, 216, 0.08); border: 1px solid rgba(148, 184, 216, 0.28); }
+    .btn-ghost:hover { background: rgba(148, 184, 216, 0.16); color: #fff; }
+
+    /* Hero 指标卡片 */
+    .hero-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .stat {
+      background: rgba(13, 27, 46, 0.55);
+      border: 1px solid rgba(148, 184, 216, 0.16);
+      border-radius: var(--radius);
+      padding: 20px;
+      backdrop-filter: blur(6px);
+    }
+    .stat .num { font-size: 30px; font-weight: 800; color: #fff; line-height: 1; }
+    .stat .num small { font-size: 15px; font-weight: 700; color: #34d399; }
+    .stat .lbl { font-size: 13px; color: #8fa6bf; margin-top: 8px; }
+
+    /* ======================================================================
+       代码块（终端 / 表格示例通用）
+       ====================================================================== */
+    .code-block {
+      position: relative;
+      background: var(--code-bg);
+      border: 1px solid #1d2f45;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow-md);
+      margin: 0;
+    }
+    .code-block .code-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 11px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid #1d2f45;
+    }
+    .code-block .code-head .dots { display: flex; gap: 6px; margin-right: 6px; }
+    .code-block .code-head .dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+    .code-block .code-head .dots i:nth-child(1) { background: #ff5f57; }
+    .code-block .code-head .dots i:nth-child(2) { background: #febc2e; }
+    .code-block .code-head .dots i:nth-child(3) { background: #28c840; }
+    .code-block .code-title { font-family: var(--font-mono); font-size: 12px; color: var(--code-dim); }
+    .code-block pre {
+      margin: 0;
+      padding: 20px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      line-height: 1.7;
+      color: var(--code-ink);
+    }
+    .code-block code { font-family: inherit; }
+    /* 简单语法着色：命令提示符、注释、输出 */
+    .c-prompt { color: var(--code-accent); font-weight: 700; }
+    .c-cmd { color: #7dd3fc; }
+    .c-flag { color: #f0abfc; }
+    .c-arg { color: #fcd34d; }
+    .c-out { color: #94a3b8; }
+    .c-comment { color: #64748b; font-style: italic; }
+    .code-block .copy-btn {
+      position: absolute; top: 9px; right: 12px;
+      font-size: 11px; font-weight: 700;
+      color: var(--code-dim);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid #2a3d55;
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: color 0.15s, border 0.15s;
+    }
+    .code-block .copy-btn:hover { color: #fff; border-color: #4a6688; }
+
+    /* ======================================================================
+       Overview / 通用卡片
+       ====================================================================== */
+    .lead { font-size: 18px; color: var(--muted); max-width: 820px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* Features 网格 */
+    .grid { display: grid; gap: 22px; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+    }
+    .feature:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: #cfe2ee; }
+    .feature .icon {
+      width: 46px; height: 46px; border-radius: 11px;
+      background: var(--accent-soft);
+      color: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 800;
+      margin-bottom: 16px;
+    }
+    .feature h3 { font-size: 17px; margin: 0 0 10px; }
+    .feature p { font-size: 14.5px; color: var(--muted); margin: 0; }
+
+    /* ======================================================================
+       步骤列表（安装 / 使用建议）
+       ====================================================================== */
+    .steps { display: grid; gap: 0; counter-reset: step; }
+    .step {
+      display: grid; grid-template-columns: 48px 1fr; gap: 20px;
+      padding: 26px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .step:last-child { border-bottom: none; }
+    .step .num {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #fff; font-weight: 800; font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step h3 { font-size: 17px; margin: 0 0 6px; }
+    .step p { font-size: 15px; color: var(--muted); margin: 0 0 10px; }
+    .step p:last-child { margin-bottom: 0; }
+
+    /* ======================================================================
+       表格
+       ====================================================================== */
+    .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+    table { width: 100%; border-collapse: collapse; font-size: 14.5px; min-width: 560px; }
+    thead th {
+      text-align: left;
+      font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted);
+      background: #f1f6fa;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody td { padding: 14px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: #fafdff; }
+    td code, .inline-code {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--primary-strong);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+    .mono { font-family: var(--font-mono); font-size: 13px; color: #0e7490; }
+
+    /* ======================================================================
+       提示框（使用建议 / 注意事项）
+       ====================================================================== */
+    .callout {
+      display: flex; gap: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin: 18px 0;
+      box-shadow: var(--shadow-sm);
+    }
+    .callout.warn { border-left-color: #f59e0b; }
+    .callout .tag { font-weight: 800; font-size: 13px; color: var(--primary); white-space: nowrap; }
+    .callout.warn .tag { color: #b45309; }
+    .callout p { margin: 0; font-size: 14.5px; color: var(--muted); }
+
+    /* 建议列表 */
+    .rec-list { display: grid; gap: 14px; }
+    .rec {
+      display: flex; gap: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+    }
+    .rec .mark { color: var(--accent); font-weight: 800; font-size: 16px; flex-shrink: 0; }
+    .rec h4 { margin: 0 0 5px; font-size: 15px; }
+    .rec p { margin: 0; font-size: 14px; color: var(--muted); }
+
+    /* ======================================================================
+       引用 / License
+       ====================================================================== */
+    .cite-box {
+      background: var(--code-bg);
+      border: 1px solid #1d2f45;
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--code-ink);
+      overflow-x: auto;
+    }
+    .cite-box .k { color: #7dd3fc; }
+    .cite-box .s { color: #fcd34d; }
+
+    /* ======================================================================
+       页脚
+       ====================================================================== */
+    footer {
+      background: var(--dark);
+      color: #9db1c8;
+      padding: 56px 0 40px;
+      margin-top: 40px;
+    }
+    footer .container { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 40px; }
+    footer h4 { color: #fff; font-size: 14px; margin: 0 0 14px; letter-spacing: 0.03em; }
+    footer ul { list-style: none; margin: 0; padding: 0; }
+    footer li { margin-bottom: 9px; }
+    footer a { color: #9db1c8; font-size: 14px; }
+    footer a:hover { color: #22d3ee; }
+    footer .foot-brand { font-size: 16px; font-weight: 800; color: #fff; }
+    footer .foot-note { font-size: 13.5px; margin-top: 12px; max-width: 420px; }
+    .foot-bottom {
+      border-top: 1px solid rgba(148, 184, 216, 0.14);
+      margin-top: 40px; padding-top: 24px;
+      display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      font-size: 13px; color: #6f869f;
+    }
+
+    /* 返回顶部按钮 */
+    .to-top {
+      position: fixed; right: 22px; bottom: 22px;
+      width: 44px; height: 44px; border-radius: 11px;
+      background: var(--primary); color: #fff;
+      border: none; cursor: pointer;
+      font-size: 18px; font-weight: 800;
+      box-shadow: var(--shadow-md);
+      opacity: 0; transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 90;
+    }
+    .to-top.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+    /* ======================================================================
+       响应式布局
+       ====================================================================== */
+    @media (max-width: 960px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 40px; }
+      .grid-3 { grid-template-columns: repeat(2, 1fr); }
+      footer .container { grid-template-columns: 1fr; gap: 28px; }
+    }
+    @media (max-width: 720px) {
+      section { padding: 56px 0; }
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .nav-links {
+        position: absolute; top: var(--nav-h); left: 0; right: 0;
+        flex-direction: column; align-items: stretch;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 12px 20px;
+        box-shadow: var(--shadow-md);
+        display: none;
+      }
+      .nav-links.open { display: flex; }
+      .nav-cta { display: none; }
+      .nav-toggle { display: flex; }
+      .hero { padding-top: calc(var(--nav-h) + 40px); }
+      .hero-stats { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 40px 1fr; gap: 14px; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ========================================================================
+       顶部导航栏
+       ======================================================================== -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top">
+        <span class="logo">SM</span>
+        SeqMatcher <span class="ver">v2.1.0</span>
+      </a>
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#quickstart">Quick Start</a></li>
+        <li><a href="#cli">CLI</a></li>
+        <li><a href="#algorithm">Algorithm</a></li>
+        <li><a href="#practices">Best Practices</a></li>
+        <li><a href="#citation">Citation</a></li>
+      </ul>
+      <a class="nav-cta" href="#quickstart">Get Started</a>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ========================================================================
+       Hero 区
+       ======================================================================== -->
+  <header class="hero" id="top">
+    <div class="container hero-inner">
+      <div>
+        <div class="badges">
+          <span class="badge"><span class="dot"></span> Written in Rust</span>
+          <span class="badge"><span class="dot"></span> Rayon Parallelism</span>
+          <span class="badge"><span class="dot"></span> Aho-Corasick Matching</span>
+          <span class="badge"><span class="dot"></span> MIT Licensed</span>
+        </div>
+        <h1>Match primers.<br /><span class="grad">Count variants.</span><br />At scale.</h1>
+        <p class="tagline">
+          SeqMatcher is a high-performance, multi-threaded DNA sequence primer matching and
+          library variant counting tool. It matches massive sequencing reads against known
+          primer pairs, quantifies per-primer coverage, and counts library variant occurrences
+          inside matched sequences.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#quickstart">Quick Start</a>
+          <a class="btn btn-ghost" href="https://github.com/CropCoder/SeqMatcher" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+      </div>
+
+      <div class="hero-stats">
+        <div class="stat"><div class="num">O(L+M)</div><div class="lbl">Variant matching via Aho-Corasick multi-pattern search</div></div>
+        <div class="stat"><div class="num">&gt;45k<small> seq/s</small></div><div class="lbl">Example throughput on 1.5M reads</div></div>
+        <div class="stat"><div class="num">128-byte</div><div class="lbl">Compile-time reverse-complement lookup table</div></div>
+        <div class="stat"><div class="num">N-core</div><div class="lbl">Work-stealing parallelism with Rayon</div></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ======================================================================
+         Overview 基本信息
+         ====================================================================== -->
+    <section id="overview">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Overview</span>
+          <h2>What is SeqMatcher?</h2>
+          <p>A fast, reproducible, single-binary tool for the most common bottleneck in amplicon sequencing pipelines: assigning reads to primer pairs and quantifying variants.</p>
+        </div>
+
+        <p class="lead" style="margin-bottom:28px;">
+          Given a table of primer pairs and a table of library variants, SeqMatcher streams one or
+          more sequence files and produces two count matrices per input: how many reads matched each
+          primer, and how many times each variant appeared under each primer. It is implemented as a
+          fully self-contained Rust binary with no runtime dependencies, built around
+          <strong>Rayon</strong> data parallelism and an <strong>Aho-Corasick</strong> automaton for
+          multi-pattern variant search.
+        </p>
+
+        <div class="grid grid-2">
+          <div class="card" style="padding:24px;">
+            <h3 style="margin-top:0;">At a glance</h3>
+            <table style="min-width:0;">
+              <tbody>
+                <tr><td><span class="mono">Language</span></td><td>Rust (stable, edition 2021)</td></tr>
+                <tr><td><span class="mono">Version</span></td><td>2.1.0</td></tr>
+                <tr><td><span class="mono">License</span></td><td>MIT</td></tr>
+                <tr><td><span class="mono">Author</span></td><td>Jiwen Zhao</td></tr>
+                <tr><td><span class="mono">Repository</span></td><td><a href="https://github.com/CropCoder/SeqMatcher" target="_blank" rel="noopener">github.com/CropCoder/SeqMatcher</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card" style="padding:24px;">
+            <h3 style="margin-top:0;">Key dependencies</h3>
+            <table style="min-width:0;">
+              <tbody>
+                <tr><td><span class="mono">clap 4</span></td><td>CLI argument parsing</td></tr>
+                <tr><td><span class="mono">csv 1.3</span></td><td>CSV reading &amp; writing</td></tr>
+                <tr><td><span class="mono">rayon 1.8</span></td><td>Data parallelism</td></tr>
+                <tr><td><span class="mono">aho-corasick 1.1</span></td><td>Multi-pattern matching</td></tr>
+                <tr><td><span class="mono">anyhow / tracing</span></td><td>Error handling &amp; logging</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Features 特性
+         ====================================================================== -->
+    <section id="features" style="background:#fff;">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Features</span>
+          <h2>Built for large sequence files</h2>
+          <p>Every design decision targets throughput, memory efficiency, and reproducibility on real sequencing-scale inputs.</p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="feature">
+            <div class="icon">AC</div>
+            <h3>Aho-Corasick variant search</h3>
+            <p>All library variants (original and reverse complement) are compiled into a single automaton once at startup, reducing per-variant <code>contains()</code> scans to one linear pass.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">//</div>
+            <h3>Rayon parallel processing</h3>
+            <p>Sequences are streamed in configurable chunks and processed with lock-free per-thread accumulation, merged at chunk boundaries.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">RC</div>
+            <h3>Compile-time reverse complement</h3>
+            <p>A 128-byte <code>const</code> lookup table maps every IUPAC nucleotide (including degenerate bases) in a single indexed load.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">IO</div>
+            <h3>Streaming I/O</h3>
+            <p>Reads are streamed line-by-line rather than loaded into memory, so file size does not limit the input scale.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">%</div>
+            <h3>Real-time progress</h3>
+            <p>An in-place progress bar reports completion percentage, throughput, and ETA without adding I/O overhead.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">R</div>
+            <h3>Reproducible by design</h3>
+            <p>Every run emits <code>run_summary.json</code> and <code>run_summary.txt</code> documenting inputs, parameters, system info, and a reproduction command.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Installation 安装
+         ====================================================================== -->
+    <section id="install">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Installation</span>
+          <h2>Install from source</h2>
+          <p>SeqMatcher is a single static binary with no runtime dependencies. Building from source requires a Rust toolchain.</p>
+        </div>
+
+        <div class="steps">
+          <div class="step">
+            <div class="num">1</div>
+            <div>
+              <h3>Clone the repository</h3>
+              <p>Get the source from GitHub.</p>
+              <div class="code-block">
+                <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">terminal</span></div>
+                <pre><code><span class="c-prompt">$</span> <span class="c-cmd">git clone</span> https://github.com/CropCoder/SeqMatcher.git
+<span class="c-prompt">$</span> <span class="c-cmd">cd</span> SeqMatcher</code></pre>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <div>
+              <h3>Build in release mode</h3>
+              <p>The release profile enables fat LTO, single codegen unit, and stripping for maximum performance.</p>
+              <div class="code-block">
+                <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">terminal</span></div>
+                <pre><code><span class="c-prompt">$</span> <span class="c-cmd">cargo build --release</span>
+<span class="c-out"># Binary: target/release/seq_matcher</span></code></pre>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <div>
+              <h3>(Optional) Cross-compile for Linux</h3>
+              <p>Produce a statically-linked ELF binary from macOS using the bundled helper script.</p>
+              <div class="code-block">
+                <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">terminal</span></div>
+                <pre><code><span class="c-comment"># Prerequisites: brew install musl-cross && rustup target add x86_64-unknown-linux-musl</span>
+<span class="c-prompt">$</span> <span class="c-cmd">./build-linux.sh</span>
+<span class="c-out"># Produces: target/x86_64-unknown-linux-musl/release/seq_matcher</span></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Quick Start 快速开始
+         ====================================================================== -->
+    <section id="quickstart" style="background:#fff;">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Quick Start</span>
+          <h2>Match in minutes</h2>
+          <p>Point SeqMatcher at a primer table, a library table, and one or more sequence files using the <code>LABEL:PATH</code> format.</p>
+        </div>
+
+        <div class="code-block" style="margin-bottom:28px;">
+          <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">terminal</span><button class="copy-btn">Copy</button></div>
+          <pre><code><span class="c-prompt">$</span> ./target/release/seq_matcher \
+    <span class="c-flag">--primer-csv</span> <span class="c-arg">primers.csv</span> \
+    <span class="c-flag">--library-csv</span> <span class="c-arg">library.csv</span> \
+    <span class="c-flag">--seq</span> <span class="c-arg">a_11:data/11_seq.txt</span> \
+    <span class="c-flag">--output-dir</span> <span class="c-arg">output</span></code></pre>
+        </div>
+
+        <h3 style="font-size:17px; margin:0 0 12px;">Example run</h3>
+        <div class="code-block">
+          <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">stdout</span><button class="copy-btn">Copy</button></div>
+          <pre><code><span class="c-out">  Loading primers from: primers_list_all.csv
+  Loaded 32 primers
+  Loading library from: 80_full_library_2_12.csv
+  Loaded 8192 library variants
+  Total: ~1500000 (est.) | 2.7 MB | chunk: 100000 | primers: 32 | variants: 8192 | AC patterns: 16384
+  [████████████████████░░░░░░░░░░░░░░░░]  55.0%  825000/1500000  45230 seq/s  ETA: 15s
+  Complete: 1500000 sequences in 33.2s, 45181 seq/s
+  Written: output/a_11_seq_matched_primers_count.csv, output/a_11_seq_matched_library_variant_count.csv
+  All done.</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         CLI Reference 命令行参数
+         ====================================================================== -->
+    <section id="cli">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Command-Line Reference</span>
+          <h2>Every option explained</h2>
+          <p>Both <code>--primer-csv</code> and <code>--library-csv</code> are required; all other options have sensible defaults.</p>
+        </div>
+
+        <div class="code-block" style="margin-bottom:24px;">
+          <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">usage</span><button class="copy-btn">Copy</button></div>
+          <pre><code><span class="c-cmd">Usage:</span> seq_matcher [OPTIONS] <span class="c-flag">--primer-csv</span> &lt;PRIMER_CSV&gt; <span class="c-flag">--library-csv</span> &lt;LIBRARY_CSV&gt;</code></pre>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Option</th><th>Description</th><th>Default</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>-p, --primer-csv</code></td><td>Primer CSV file path (columns: id, forward_seq, reverse_seq)</td><td>required</td></tr>
+              <tr><td><code>-l, --library-csv</code></td><td>Library variant CSV file path</td><td>required</td></tr>
+              <tr><td><code>--library-seq-col</code></td><td>Column name in library CSV containing the variant sequence</td><td><code>single_degenerate_library_expanded_reference</code></td></tr>
+              <tr><td><code>-s, --seq</code></td><td>Sequence files in <code>LABEL:PATH</code> format; repeatable for batch processing</td><td>&mdash;</td></tr>
+              <tr><td><code>-o, --output-dir</code></td><td>Output directory for result CSVs</td><td><code>output</code></td></tr>
+              <tr><td><code>-c, --chunk-size</code></td><td>Number of sequences per parallel processing chunk</td><td><code>100000</code></td></tr>
+              <tr><td><code>-t, --threads</code></td><td>Number of worker threads</td><td>all cores</td></tr>
+              <tr><td><code>--dry-run</code></td><td>Validate inputs and exit without processing</td><td>off</td></tr>
+              <tr><td><code>-q, --quiet</code></td><td>Suppress non-error output</td><td>off</td></tr>
+              <tr><td><code>-v, --verbose</code></td><td>Enable verbose debug output</td><td>off</td></tr>
+              <tr><td><code>--timestamp-output</code></td><td>Append a timestamp to output filenames</td><td>off</td></tr>
+              <tr><td><code>-h, --help</code></td><td>Print help information</td><td>&mdash;</td></tr>
+              <tr><td><code>-V, --version</code></td><td>Print version information</td><td>&mdash;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Input & Output Formats
+         ====================================================================== -->
+    <section id="formats" style="background:#fff;">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Input &amp; Output</span>
+          <h2>File formats</h2>
+          <p>All tabular I/O uses CSV. Original columns are preserved, and matching counts are appended as new columns.</p>
+        </div>
+
+        <div class="grid grid-3" style="margin-bottom:48px;">
+          <div class="feature">
+            <div class="icon">P</div>
+            <h3>Primer CSV</h3>
+            <p>Any number of columns. The first three are treated as primer ID, forward sequence, and reverse sequence; all remaining columns are passed through unchanged.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">L</div>
+            <h3>Library CSV</h3>
+            <p>Contains a variant sequence column whose name is set via <code>--library-seq-col</code>. Empty sequences become "always-matched" variants for Python compatibility.</p>
+          </div>
+          <div class="feature">
+            <div class="icon">S</div>
+            <h3>Sequence files</h3>
+            <p>Plain text with one DNA sequence per line. Sequences are normalized to uppercase automatically; no preprocessing required.</p>
+          </div>
+        </div>
+
+        <h3 style="font-size:17px; margin:0 0 12px;">Primer CSV example</h3>
+        <div class="code-block" style="margin-bottom:24px;">
+          <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">primers.csv</span><button class="copy-btn">Copy</button></div>
+          <pre><code><span class="c-out">primer_id,forward_seq,reverse_seq,extra_columns...
+P001,ATCGGTACC,GCTATAGCA,(preserved)
+P002,TGCACTGAC,CGTACGATG,(preserved)</span></code></pre>
+        </div>
+
+        <h3 style="font-size:17px; margin:0 0 12px;">Library CSV example</h3>
+        <div class="code-block" style="margin-bottom:24px;">
+          <div class="code-head"><span class="dots"><i></i><i></i><i></i></span><span class="code-title">library.csv</span><button class="copy-btn">Copy</button></div>
+          <pre><code><span class="c-out">variant_id,single_degenerate_library_expanded_reference,extra_columns...
+V001,ATCGNNNTCGA,(preserved)</span></code></pre>
+        </div>
+
+        <h3 style="font-size:17px; margin:0 0 12px;">Output files</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Contents</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">{LABEL}_seq_matched_primers_count.csv</td><td>Original primer table plus a <code>count_{LABEL}</code> column (sequences matched per primer).</td></tr>
+              <tr><td class="mono">{LABEL}_seq_matched_library_variant_count.csv</td><td>Original library table plus one column per primer (<code>{primer_id}_{LABEL}</code>) with per-variant counts.</td></tr>
+              <tr><td class="mono">run_summary.json</td><td>Machine-readable run report: inputs, parameters, system info.</td></tr>
+              <tr><td class="mono">run_summary.txt</td><td>Human-readable run report including a reproduction command.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Algorithm 原理
+         ====================================================================== -->
+    <section id="algorithm">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">How It Works</span>
+          <h2>The matching pipeline</h2>
+          <p>Eight steps take raw sequence files to count matrices, optimized for throughput at every stage.</p>
+        </div>
+
+        <div class="steps" style="margin-bottom:48px;">
+          <div class="step">
+            <div class="num">1</div>
+            <div><h3>Load and pre-compute</h3><p>Primer and library tables are loaded; reverse complements are pre-computed for every sequence using a compile-time 128-byte lookup table.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <div><h3>Build the automaton</h3><p>An Aho-Corasick automaton encodes all library variants (original plus reverse complement) as multi-pattern states. It is built once and shared via <code>Arc</code> across threads.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <div><h3>Estimate line count</h3><p>Total lines are estimated from file size by sampling the first lines, avoiding a full pre-scan of the input.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">4</div>
+            <div><h3>Match primers</h3><p>Each sequence is tested against primers with <em>first-match-wins</em> semantics using anchored prefix/suffix matching (PCR amplicon model).</p></div>
+          </div>
+          <div class="step">
+            <div class="num">5</div>
+            <div><h3>Scan for variants</h3><p>Matched sequences undergo a single Aho-Corasick scan to detect all variant hits (deduplicated), replacing per-variant <code>contains()</code> calls.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">6</div>
+            <div><h3>Accumulate lock-free</h3><p>Each thread accumulates counts independently; results are merged only at chunk boundaries.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">7</div>
+            <div><h3>Report progress</h3><p>A real-time progress bar shows completion percentage, throughput, and ETA.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">8</div>
+            <div><h3>Write outputs</h3><p>Count matrices are written to CSV with buffered I/O, alongside reproducible run summaries.</p></div>
+          </div>
+        </div>
+
+        <h3 style="font-size:17px; margin:0 0 12px;">Performance optimizations</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Optimization</th><th>Implementation</th></tr></thead>
+            <tbody>
+              <tr><td>Reverse complement</td><td>Compile-time <code>const</code> 128-byte LUT, single-cycle indexed mapping</td></tr>
+              <tr><td>Variant matching</td><td>Aho-Corasick multi-pattern search, O(L+M) instead of O(V&middot;L)</td></tr>
+              <tr><td>Parallel processing</td><td>Rayon work-stealing, chunk-level parallelism</td></tr>
+              <tr><td>Cross-thread sharing</td><td><code>Arc</code> zero-copy sharing of primers, library, and automaton</td></tr>
+              <tr><td>Output I/O</td><td><code>BufWriter</code> buffered writes</td></tr>
+              <tr><td>Line counting</td><td>File-size-based estimation avoids full pre-scan I/O</td></tr>
+              <tr><td>Variant count output</td><td>Pre-built column vectors for O(1) lookups over O(P&middot;V) HashMap access</td></tr>
+              <tr><td>Progress feedback</td><td>In-place progress bar, no extra I/O overhead</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Best Practices 使用建议
+         ====================================================================== -->
+    <section id="practices" style="background:#fff;">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Best Practices</span>
+          <h2>Recommendations</h2>
+          <p>Practical guidance for getting correct, reproducible results on sequencing-scale data.</p>
+        </div>
+
+        <div class="rec-list">
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Validate before processing</h4><p>Run with <code>--dry-run</code> first to confirm primers, library variants, and sequence files are all loaded and consistent before committing to a long run.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Keep primer IDs unique and non-empty</h4><p>Duplicate or empty primer IDs are rejected at validation time. Each ID becomes an output column name, so keep them short and filesystem-safe.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Use meaningful sequence labels</h4><p>The <code>LABEL</code> in <code>LABEL:PATH</code> drives output filenames and count column headers, so use descriptive labels (for example <code>sample_a_rep1</code>).</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Tune chunk size for very large files</h4><p>Larger chunks reduce merge synchronization at the cost of a little peak memory. The default <code>100000</code> is a good balance for most inputs.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Mind the empty variants</h4><p>Empty library sequences are always counted as a match (Python-compatible behavior). Verify your library has no unintended empty rows if this surprises you.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Treat progress as an estimate</h4><p>Total lines are extrapolated from file size, so the progress bar and ETA are estimates until the final chunk completes.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Pin down reproducibility</h4><p>Use <code>--timestamp-output</code> and keep the generated <code>run_summary.txt</code> alongside your results; it records the exact command and environment used.</p></div></div>
+          <div class="rec"><span class="mark">&rsaquo;</span><div><h4>Scale threads to your workload</h4><p>SeqMatcher defaults to all cores. For I/O-bound inputs on shared machines, limit concurrency with <code>--threads</code>.</p></div></div>
+        </div>
+
+        <div class="callout warn" style="margin-top:24px;">
+          <span class="tag">Note</span>
+          <p>Primer matching is <em>anchored</em>: a read must start with one primer and end with the reverse complement of its partner. Internal or partial binding is intentionally not counted.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         Citation 引用
+         ====================================================================== -->
+    <section id="citation">
+      <div class="container">
+        <div class="section-head">
+          <span class="kicker">Citation</span>
+          <h2>Cite SeqMatcher</h2>
+          <p>If you use SeqMatcher in your research, please cite it. A <code>CITATION.cff</code> file is included for GitHub and Zenodo integration.</p>
+        </div>
+
+        <div class="cite-box">
+          <span class="k">@software</span>{seq_matcher,<br />
+          &nbsp;&nbsp;<span class="k">author</span> = {Zhao, Jiwen},<br />
+          &nbsp;&nbsp;<span class="k">title</span> = <span class="s">{SeqMatcher: High-performance DNA sequence primer matching and variant counting}</span>,<br />
+          &nbsp;&nbsp;<span class="k">year</span> = {2026},<br />
+          &nbsp;&nbsp;<span class="k">version</span> = {2.0.0},<br />
+          &nbsp;&nbsp;<span class="k">url</span> = {https://github.com/CropCoder/SeqMatcher}<br />
+          }
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================================
+       页脚
+       ======================================================================== -->
+  <footer>
+    <div class="container">
+      <div>
+        <div class="foot-brand">SeqMatcher</div>
+        <p class="foot-note">High-performance multi-threaded DNA sequence primer matching and library variant counting, written in Rust.</p>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="https://github.com/CropCoder/SeqMatcher" target="_blank" rel="noopener">GitHub Repository</a></li>
+          <li><a href="https://github.com/CropCoder/SeqMatcher/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+          <li><a href="https://github.com/CropCoder/SeqMatcher/blob/master/CITATION.cff" target="_blank" rel="noopener">CITATION.cff</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>License</h4>
+        <ul>
+          <li><a href="https://github.com/CropCoder/SeqMatcher/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="container">
+      <div class="foot-bottom">
+        <span>&copy; 2026 Jiwen Zhao. SeqMatcher is open source under the MIT License.</span>
+        <span>Built with Rust, Rayon, and Aho-Corasick.</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 返回顶部按钮 -->
+  <button class="to-top" id="toTop" aria-label="Back to top">&uarr;</button>
+
+  <script>
+    /* ======================================================================
+       站内交互脚本（原生 JS，无外部依赖）
+       1) 移动端导航菜单折叠
+       2) 滚动时导航栏阴影与"返回顶部"按钮显隐
+       3) 当前视口 Section 的导航高亮
+       4) 代码块一键复制
+       ====================================================================== */
+
+    // 1) 移动端导航菜单折叠
+    const navToggle = document.getElementById('navToggle');
+    const navLinks = document.getElementById('navLinks');
+    navToggle.addEventListener('click', () => {
+      navLinks.classList.toggle('open');
+    });
+    // 点击导航链接后自动收起菜单（移动端）
+    navLinks.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A') navLinks.classList.remove('open');
+    });
+
+    // 2) 滚动时导航栏阴影与返回顶部按钮显隐
+    const nav = document.getElementById('nav');
+    const toTop = document.getElementById('toTop');
+    const onScroll = () => {
+      const y = window.scrollY;
+      nav.classList.toggle('scrolled', y > 10);
+      toTop.classList.toggle('show', y > 500);
+      highlightCurrentSection();
+    };
+    toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+    // 3) 当前视口 Section 的导航高亮
+    const sections = ['overview', 'features', 'quickstart', 'cli', 'algorithm', 'practices', 'citation']
+      .map(id => document.getElementById(id))
+      .filter(Boolean);
+    const navAnchors = Array.from(document.querySelectorAll('.nav-links a'));
+    function highlightCurrentSection() {
+      let currentId = '';
+      const probe = window.scrollY + 120;
+      for (const sec of sections) {
+        if (sec.offsetTop <= probe) currentId = sec.id;
+      }
+      navAnchors.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + currentId);
+      });
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    // 4) 代码块一键复制
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const code = btn.closest('.code-block').querySelector('pre code');
+        const text = code ? code.innerText : '';
+        try {
+          await navigator.clipboard.writeText(text);
+          const original = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(() => { btn.textContent = original; }, 1400);
+        } catch (e) {
+          // 剪贴板不可用时降级为选中提示，不中断页面
+          btn.textContent = 'Failed';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
